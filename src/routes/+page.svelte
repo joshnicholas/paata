@@ -2,6 +2,7 @@
 	import ColourPicker from '$lib/components/ColourPicker.svelte';
 	import ColourHarmonies from '$lib/components/ColourHarmonies.svelte';
 	import ContrastPairs from '$lib/components/ContrastPairs.svelte';
+	import HuePairFinder from '$lib/components/HuePairFinder.svelte';
 
 	let colour = $state('#ff0000');
 </script>
@@ -11,5 +12,6 @@
 		<ColourPicker oncolour={(c) => colour = c} />
 		<ColourHarmonies {colour} />
 		<ContrastPairs {colour} />
+		<HuePairFinder {colour} />
 	</div>
 </main>

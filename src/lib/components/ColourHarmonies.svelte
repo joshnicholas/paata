@@ -3,6 +3,7 @@
 
 	let count = $state(5);
 	let mode = $state('oklch');
+	let satScale = $state(1);
 
 	// ── OKLCH ────────────────────────────────────────────────────────────────
 
@@ -207,18 +208,40 @@
 
 	// ── Rows ─────────────────────────────────────────────────────────────────
 
+	const scale = colours => satScale === 1 ? colours : colours.map(hex => scaleSat(hex, satScale));
+
 	const rows = $derived([
-		{ label: 'Complementary',  colours: interpolateHue(colour, 0, 180, count) },
-		{ label: 'Triadic',        colours: cycleHues(colour, [0, 120, 240], count) },
-		{ label: 'Analogous',      colours: interpolateHue(colour, -30, 30, count) },
-		{ label: 'Split-comp',     colours: cycleHues(colour, [0, 150, 210], count) },
-		{ label: 'Tetradic',       colours: cycleHues(colour, [0, 90, 180, 270], count) },
-		{ label: 'Tints & shades', colours: tintsShades(colour, count) },
-		{ label: 'Temperature',    colours: temperature(colour, count) },
-		{ label: 'Seq dark',       colours: sequential(colour, count, 'dark') },
-		{ label: 'Seq light',      colours: sequential(colour, count, 'light') },
-		{ label: 'Seq mid',        colours: sequential(colour, count, 'mid') },
+		{ label: 'Complementary',  colours: scale(interpolateHue(colour, 0, 180, count)) },
+		{ label: 'Triadic',        colours: scale(cycleHues(colour, [0, 120, 240], count)) },
+		{ label: 'Analogous',      colours: scale(interpolateHue(colour, -30, 30, count)) },
+		{ label: 'Split-comp',     colours: scale(cycleHues(colour, [0, 150, 210], count)) },
+		{ label: 'Tetradic',       colours: scale(cycleHues(colour, [0, 90, 180, 270], count)) },
+		{ label: 'Tints & shades', colours: scale(tintsShades(colour, count)) },
+		{ label: 'Temperature',    colours: scale(temperature(colour, count)) },
+		{ label: 'Seq dark',       colours: scale(sequential(colour, count, 'dark')) },
+		{ label: 'Seq light',      colours: scale(sequential(colour, count, 'light')) },
+		{ label: 'Seq mid',        colours: scale(sequential(colour, count, 'mid')) },
 	]);
+
+	function scaleSat(hex, scale) {
+		if (scale === 1) return hex;
+		if (mode === 'oklch') {
+			const {L, C, H} = hexToOklch(hex);
+			return oklchToHex(L, C * scale, H);
+		}
+		if (mode === 'hsv') {
+			const {h, s, v} = hexToHsv(hex);
+			return hsvToHex(h, s * scale, v);
+		}
+		if (mode === 'hwb') {
+			const {h, w, bk} = hexToHwb(hex);
+			const chroma = 1 - w / 100 - bk / 100;
+			const delta = chroma * (1 - scale);
+			return hwbToHex(h, Math.min(100, w + delta * 50), Math.min(100, bk + delta * 50));
+		}
+		const {h, s, l} = hexToHsl(hex);
+		return hslToHex(h, s * scale, l);
+	}
 
 	function copy(hex) { navigator.clipboard.writeText(hex); }
 	function copyRow(colours) { navigator.clipboard.writeText(JSON.stringify(colours)); }
@@ -239,6 +262,17 @@
 				<option value="hsv">HSV</option>
 				<option value="hwb">HWB</option>
 			</select>
+		</div>
+		<div class="flex items-center gap-2">
+			<span class="text-xs text-gray-400 font-medium">Saturation</span>
+			<input type="range" min="0" max="1" step="0.01"
+				bind:value={satScale}
+				class="w-24 cursor-pointer accent-gray-600" />
+			<span class="text-xs font-mono text-gray-400 w-8">{Math.round(satScale * 100)}%</span>
+			{#if satScale !== 1}
+				<button onclick={() => satScale = 1}
+					class="text-xs text-gray-400 hover:text-gray-700 px-1.5 py-1 bg-gray-100 hover:bg-gray-200 cursor-pointer font-mono">reset</button>
+			{/if}
 		</div>
 	</div>
 
