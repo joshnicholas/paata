@@ -5,6 +5,7 @@
 
 	const bgInput = $derived(bgManual ?? colour);
 	let level = $state('aa');
+	let mode = $state('fg'); // 'fg' | 'bg-edge'
 
 	// ── OKLCH ────────────────────────────────────────────────────────────────
 
@@ -87,11 +88,16 @@
 	const bgHex = $derived(parseHex(bgInput));
 	const fgHex = $derived(parseHex(fgInput));
 	const fgOklch = $derived(fgHex ? hexToOklch(fgHex) : null);
+	const bgOklch = $derived(bgHex ? hexToOklch(bgHex) : null);
 	const bgLum = $derived(bgHex ? luminance(bgHex) : null);
-	let chromaMax = $state(null); // null = auto (from fg hex)
+	let chromaMax = $state(null); // null = auto
 
 	const targetRatio = $derived(level === 'aaa' ? 7 : 4.5);
-	const maxChroma = $derived(chromaMax ?? (fgOklch ? Math.min(Math.max(fgOklch.C, 0.20), 0.35) : 0.25));
+	const maxChroma = $derived(chromaMax ?? (
+		mode === 'bg-edge'
+			? (bgOklch ? Math.min(Math.max(bgOklch.C, 0.10), 0.35) : 0.25)
+			: (fgOklch ? Math.min(Math.max(fgOklch.C, 0.20), 0.35) : 0.25)
+	));
 
 	// Sample 10 chroma steps from near-grey up to maxChroma; show all valid results
 	const results = $derived.by(() => {
@@ -110,6 +116,37 @@
 			}
 		}
 		out.sort((a, b) => hexToOklch(a.fg).C - hexToOklch(b.fg).C);
+		return out;
+	});
+
+	// For a given background hue, find the lightest background where fgHex text achieves targetRatio.
+	// This is the "edge" — anything lighter than this bg and the light text fails.
+	const bgEdges = $derived.by(() => {
+		if (!bgOklch || !fgHex) return [];
+		const out = [];
+		const steps = 10;
+		const textLum = luminance(fgHex);
+
+		for (let i = 0; i < steps; i++) {
+			const C = 0.03 + (i / (steps - 1)) * (maxChroma - 0.03);
+
+			const getRatio = (L) => {
+				const lum = luminance(oklchToHex(L, C, bgOklch.H));
+				return (Math.max(textLum, lum) + 0.05) / (Math.min(textLum, lum) + 0.05);
+			};
+
+			// Binary search: max L where ratio >= targetRatio (higher L = lighter bg = less contrast)
+			let lo = 0.02, hi = 0.98;
+			for (let j = 0; j < 24; j++) {
+				const mid = (lo + hi) / 2;
+				if (getRatio(mid) >= targetRatio) lo = mid; else hi = mid;
+			}
+
+			const edgeL = lo;
+			if (getRatio(edgeL) < targetRatio) continue;
+			out.push({ bg: oklchToHex(edgeL, C, bgOklch.H), ratio: getRatio(edgeL), C });
+		}
+
 		return out;
 	});
 
@@ -142,7 +179,7 @@
 		</div>
 		<!-- Foreground reference -->
 		<div class="flex flex-col gap-1">
-			<span class="text-xs text-gray-400 font-medium">Foreground (target hue)</span>
+			<span class="text-xs text-gray-400 font-medium">{mode === 'bg-edge' ? 'Foreground (light text)' : 'Foreground (target hue)'}</span>
 			<div class="flex items-center gap-1.5">
 				<input type="color"
 					value={fgHex ?? '#cccccc'}
@@ -167,6 +204,28 @@
 				<option value="aaa">AAA  7:1</option>
 			</select>
 		</div>
+		<!-- Mode -->
+		<div class="flex flex-col gap-1">
+			<span class="text-xs text-gray-400 font-medium">Mode</span>
+			<div class="flex h-[30px]">
+				<button
+					onclick={() => mode = 'fg'}
+					class="px-2 py-1 text-xs font-mono cursor-pointer border border-gray-200"
+					class:bg-gray-700={mode === 'fg'}
+					class:text-white={mode === 'fg'}
+					class:bg-gray-100={mode !== 'fg'}
+					class:text-gray-600={mode !== 'fg'}
+				>text pairs</button>
+				<button
+					onclick={() => mode = 'bg-edge'}
+					class="px-2 py-1 text-xs font-mono cursor-pointer border border-gray-200 border-l-0"
+					class:bg-gray-700={mode === 'bg-edge'}
+					class:text-white={mode === 'bg-edge'}
+					class:bg-gray-100={mode !== 'bg-edge'}
+					class:text-gray-600={mode !== 'bg-edge'}
+				>bg edge</button>
+			</div>
+		</div>
 		<!-- Chroma -->
 		<div class="flex flex-col gap-1">
 			<span class="text-xs text-gray-400 font-medium">Max chroma</span>
@@ -185,34 +244,65 @@
 	</div>
 
 	<!-- Results -->
-	{#if bgHex && fgOklch}
-		{#if results.length === 0}
-			<p class="text-xs text-gray-400 font-mono">No valid foreground colours found at this hue and level.</p>
-		{:else}
-			<div class="flex flex-col gap-0.5">
-				{#each results as r}
-					<div class="flex items-stretch gap-0.5">
-						<button
-							onclick={() => copyPair(r.fg)}
-							class="flex-1 flex items-center justify-between px-3 cursor-pointer min-w-0"
-							style="background:{bgHex}; height:36px;"
-							title="Click to copy pair as JSON"
-						>
-							<span class="font-mono text-xs" style="color:{r.fg};">{r.fg}</span>
-							<span class="font-mono text-xs" style="color:{r.fg};">Aa</span>
-						</button>
-						<div class="flex-shrink-0 flex items-center justify-end w-14">
-							<span class="text-xs font-mono text-gray-400">{r.ratio.toFixed(1)}</span>
+	{#if mode === 'fg'}
+		{#if bgHex && fgOklch}
+			{#if results.length === 0}
+				<p class="text-xs text-gray-400 font-mono">No valid foreground colours found at this hue and level.</p>
+			{:else}
+				<div class="flex flex-col gap-0.5">
+					{#each results as r}
+						<div class="flex items-stretch gap-0.5">
+							<button
+								onclick={() => copyPair(r.fg)}
+								class="flex-1 flex items-center justify-between px-3 cursor-pointer min-w-0"
+								style="background:{bgHex}; height:36px;"
+								title="Click to copy pair as JSON"
+							>
+								<span class="font-mono text-xs" style="color:{r.fg};">{r.fg}</span>
+								<span class="font-mono text-xs" style="color:{r.fg};">Aa</span>
+							</button>
+							<div class="flex-shrink-0 flex items-center justify-end w-14">
+								<span class="text-xs font-mono text-gray-400">{r.ratio.toFixed(1)}</span>
+							</div>
+							<button
+								onclick={() => copy(r.fg)}
+								title={r.fg}
+								class="flex-shrink-0 cursor-pointer"
+								style="background:{r.fg}; width:36px; height:36px;"
+							></button>
 						</div>
-						<button
-							onclick={() => copy(r.fg)}
-							title={r.fg}
-							class="flex-shrink-0 cursor-pointer"
-							style="background:{r.fg}; width:36px; height:36px;"
-						></button>
-					</div>
-				{/each}
-			</div>
+					{/each}
+				</div>
+			{/if}
+		{/if}
+	{:else if mode === 'bg-edge'}
+		{#if fgOklch}
+			{#if bgEdges.length === 0}
+				<p class="text-xs text-gray-400 font-mono">No valid background edges found at this hue and level.</p>
+			{:else}
+				<p class="text-xs text-gray-400 font-mono mb-1">Lightest background at each chroma where <span class="font-bold" style="color:{fgHex}">{fgHex}</span> text still passes.</p>
+				<div class="flex flex-col gap-0.5">
+					{#each bgEdges as e}
+						<div class="flex items-stretch gap-0.5">
+							<button
+								onclick={() => copy(e.bg)}
+								class="flex-1 flex items-center justify-between px-3 cursor-pointer min-w-0"
+								style="background:{e.bg}; height:36px;"
+								title="Click to copy background hex"
+							>
+								<span class="font-mono text-xs" style="color:{fgHex}">{e.bg}</span>
+								<span class="font-mono text-xs" style="color:{fgHex}">Aa</span>
+							</button>
+							<div class="flex-shrink-0 flex items-center justify-end w-14">
+								<span class="text-xs font-mono text-gray-400">{e.ratio.toFixed(1)}</span>
+							</div>
+							<div class="flex-shrink-0 flex items-center justify-end w-10">
+								<span class="text-xs font-mono text-gray-300">C{e.C.toFixed(2)}</span>
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
 		{/if}
 	{/if}
 </div>
